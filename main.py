@@ -7,8 +7,10 @@ import json
 
 # from easyocr import easyocr
 from kivy.config import Config
+from pybroker import YFinance
 
-from utils import startGetData
+from compute_utils import compute_us_indicators
+from utils import startGetData, getData
 
 # 注册字体文件
 font_path = os.path.join("font", 'SourceHanSansCN-Normal.otf')
@@ -381,7 +383,7 @@ class MyApp(App):
                 # 将保存的数据插入到顶部
                 self.text_list_layout.add_widget(item_layout)
 
-
+import akshare as ak
 if __name__ == '__main__':
     # 创建result 文件夹
     if not os.path.exists("result"):

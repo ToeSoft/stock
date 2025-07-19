@@ -3,13 +3,14 @@ import os
 import threading
 import time
 from datetime import datetime
-from time import sleep
 
-import pandas as pd
 from pybroker.ext.data import AKShare
+from pybroker import YFinance
 import akshare as ak
+import yfinance as yf
 
-from compute_utils import compute_indicators, compute_hk_indicators
+
+from compute_utils import compute_indicators, compute_hk_indicators, compute_us_indicators
 from excel import generateExcel, generateTxt
 import concurrent.futures
 
@@ -174,6 +175,46 @@ def getData(stockCode, onError, retryTime):
             temp_dir = os.path.join("temp")
             with open(os.path.join(temp_dir, stockCode + ".json"), "w", encoding="utf-8") as f:
                 f.write(json_str)
+        elif stockCode.startswith("US") or stockCode.startswith("us"):
+            # 获取数据
+            symbol = stockCode[2:]
+
+            today = datetime.today().strftime('%m/%d/%Y')
+            stock_us_security_profile_em_df = YFinance().query([symbol], start_date='3/1/1800', end_date=today)
+
+            stock = yf.Ticker("AAPL")
+
+            overview = today_overview([symbol])
+            df = compute_us_indicators(stock_us_security_profile_em_df, symbol=symbol)
+            df_sub = df[[
+                'MA5', 'MA10', 'MA20', 'MA30', 'MA60',
+                'VOL', 'VOL_MA5', 'VOL_MA10',
+                'RSI6', 'RSI12', 'RSI24',
+                'K', 'D', 'J',
+                'DIF', 'DEA', 'MACD',
+                'WR10', 'WR6',
+                'PDI', 'MDI', 'ADX', 'ADXR',
+                'BIAS6', 'BIAS12', 'BIAS24',
+                'OBV', 'OBV_MA',
+                'CCI',
+                'ROC', 'ROC_MA',
+                'CR', 'MA1', 'MA2', 'MA3',
+                'BOLL_MID', 'BOLL_STD', 'BOLL_UPPER', 'BOLL_LOWER'
+            ]]
+            # 转成 JSON 字符串（列表形式，每一行是一个 dict）
+            json_str = df_sub.to_json(orient='records', date_format='iso')
+            records = json.loads(json_str)
+            result = {
+                "今日概览": overview,
+                "数据指标": records[0],
+                "股票信息": stock.info,
+            }
+            json_str = json.dumps(result, ensure_ascii=False, indent=2)
+
+            # 保存数据到文件
+            temp_dir = os.path.join("temp")
+            with open(os.path.join(temp_dir, stockCode + ".json"), "w", encoding="utf-8") as f:
+                f.write(json_str)
         else:
             raise ValueError(f"不支持的股票代码格式: {stockCode}")
 
@@ -192,7 +233,7 @@ def getData(stockCode, onError, retryTime):
 
 def updateStockList():
     try:
-        # 读取文件
+        # 读取文件 测试
         with open("stock_list.json", "r", encoding="utf-8") as f:
             stockList = json.load(f)
 
@@ -210,9 +251,9 @@ def updateStockList():
                     stock_info = dataJson.get("股票信息", {})
 
                     # 优先取“证券简称”，如果没有就取“股票简称”，都没有就设为 None 或 ""
-                    stockName = stock_info.get("证券简称") or stock_info.get("股票简称") or ""
-
-                    tempStockList.append(stockCode + ":" + stockName)
+                    stockName = stock_info.get("证券简称") or stock_info.get("股票简称")or stock_info.get("displayName")  or ""
+                    if stockName is not "":
+                        tempStockList.append(stockCode + ":" + stockName)
             else:
                 tempStockList.append(stockCode)
 
@@ -222,3 +263,43 @@ def updateStockList():
     except Exception as e:
         with open("error.log", "a", encoding="utf-8") as f:
             f.write(str(e) + "\n")
+
+
+def today_overview(symbol):
+    """
+    获取单只股票今日概览（支持 symbol 为字符串或单元素列表）
+    """
+    if isinstance(symbol, list) and len(symbol) == 1:
+        symbol = symbol[0]
+
+    df = yf.download(symbol, period="1d", interval="1d", progress=False)
+    if df.empty:
+        return {"股票代码": symbol, "提示": "今日无交易数据"}
+
+    row = df.iloc[-1]
+
+    def safe_float(val):
+        if hasattr(val, "iloc"):
+            val = val.iloc[0]
+        return float(val)
+
+    def safe_int(val):
+        if hasattr(val, "iloc"):
+            val = val.iloc[0]
+        return int(val)
+
+    open_ = safe_float(row['Open'])
+    close = safe_float(row['Close'])
+    high = safe_float(row['High'])
+    low = safe_float(row['Low'])
+    volume = safe_int(row['Volume'])
+
+    return {
+        "股票代码": symbol,
+        "当前价格": round(close, 2),
+        "开盘": round(open_, 2),
+        "最高": round(high, 2),
+        "最低": round(low, 2),
+        "收盘": round(close, 2),
+        "成交量": volume
+    }
